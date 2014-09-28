@@ -17,4 +17,4 @@ auto_sale_stock
 4. 卖出后的(抛售价 / 买入价)
 5. 当前的盈亏
 
-![screenshot](/path/screenshot.png)
+![screenshot](/screenshot.png)
