@@ -1,16 +1,11 @@
-import urllib
 import sys
 import random
 import urllib2
 from bs4 import BeautifulSoup
-import requests
 import re
 import time
 import thread
-from requests.packages.urllib3.poolmanager import PoolManager, proxy_from_url
-from ssl import PROTOCOL_TLSv1
 import mechanize
-from ghost import Ghost
 import json
 
 path = {
@@ -23,174 +18,247 @@ path = {
 	"es" : "http://www.amazon.es/",
 	"it" : "http://www.amazon.it/"
 	}
+head = [("User-agent", "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.2.13) Gecko/20101206 Ubuntu/10.10 (maverick) Firefox/3.6.13")]
+
+
+
 
 def download(url):
-	header = {'User-Agent':'Mozilla/5.0 (Windows; U; Windows NT 6.1; en-US; rv:1.9.1.6) Gecko/20091201 Firefox/3.5.6',
-		'Referer':None}
-	#req = urllib2.Request(url, headers=header )
-	#con = urllib2.urlopen( req )
-	#doc = con.read()
-	#con.close()
-	response = requests.get(url)
-	return response.content
+	br = mechanize.Browser()  
+	# br.set_debug_http(True)
+	br.set_handle_robots(False)
+	br.addheaders = head
+	return br.open(url).read()
 
-class Amazon:
-	country = ""
-	keyword = ""
-	product_list = []
+def requestXML(url,data):
+	br.set_debug_http(True)
+	br.set_handle_robots(False)
+	br.addheaders = head
 
+	#"https://sellercentral.amazon.co.jp/hz/inventory/save?ref_=xx_xx_save_xx"
+	br.open(mechanize.Request(url, data=json.dumps(data), headers={"Content-type":"application/json"}))
+
+
+class AmazonBuyer:
 	def __init__(self,country,keyword):
+		self.lock_search = thread.allocate_lock()
+		self.lock_write_file = thread.allocate_lock()
 		self.country = country
 		self.keyword = keyword
+		self.product_list = []
+		self.processNum = 0
+
 		data = download(path[self.country]+"s/field-keywords="+keyword)
 		soup = BeautifulSoup(data)
-		self.read_listpage_item(soup)
+		self.read_category(soup)
+
+	def read_category(self,soup):
+		category = soup.find(id = "refinements")
+		categoryList = [path[self.country]+item.a.attrs["href"] for item in category.find(attrs={"class":"forExpando"}).contents if item != "\n"]
+		categoryList.extend([path[self.country]+item.a.attrs["href"] for item in category.find(attrs={"class":"seeAllSmartRefDepartmentOpen"}).contents if item != "\n"])
+
+		thread.start_new_thread(self.write_to_csv,())
+
+		while True:
+			if(len(categoryList) == 0):
+				return
+			self.lock_search.acquire()
+			if self.processNum <= 3:
+				thread.start_new_thread(self.new_SearchProcess,(categoryList.pop(),))
+			self.lock_search.release()
+
+	def new_SearchProcess(self,url):
+		self.lock_search.acquire()
+		self.processNum = self.processNum + 1
+		self.lock_search.release()
+
+		soup = BeautifulSoup(download(url))
+		while True:
+			self.read_listpage_item(soup)
+			ret,soup = self.next_page(soup)
+			if ret != 0:
+				self.lock_search.acquire()
+				self.processNum = self.processNum - 1
+				self.lock_search.release()
+				return
+
+	def write_to_csv(self):
+		output = open('data.csv', 'w+')
+		while True:
+			product_list = []
+			self.lock_write_file.acquire()
+			if len(self.product_list)>0:
+				product_list = self.product_list
+				self.product_list = []
+			self.lock_write_file.release()
+
+			for product in product_list:
+				data = str(product.asin)+";"+str(product.weight)+";"+"\n"#+str(product.title)+"\n"
+				output.write(data)
+
+			time.sleep(2)
+		output.close()
+
+			
 
 	def read_listpage_item(self,soup):
 		productXMLList = soup.findAll('li', {"class","s-result-item"})
-		[self.product_list.append(Product(item.attrs['data-asin'])) for item in productXMLList]
-		self.next_page(soup)
+
+		for item in productXMLList:
+			product = Product(item.attrs['data-asin'])
+			self.lock_write_file.acquire()
+			self.product_list.append(product)
+			self.lock_write_file.release()
+
+		return 1
 
 	def next_page(self,soup):
 		try:
 			nextpagelink = soup.find(id = "pagnNextLink").attrs["href"]
 		except:
-			return
+			return (-1,None)
+		print "next page"
 		data = download(path[self.country]+nextpagelink)
 		soup = BeautifulSoup(data)
-		self.read_listpage_item(soup)
+		return (0,soup)
 
+class AmazonSeller:
+	def __init__(self, account, password):
+		self.account = account
+		self.password = password
 
+		self.br = mechanize.Browser()
+		br.set_debug_http(True)
+		br.set_handle_robots(False)
+		br.addheaders = head
+
+	def login(self):
+		self.br.open('https://www.amazon.co.jp/gp/sign-in.html')
+
+		br.select_form(name="signIn")  
+		br["email"] = self.account
+		br["password"] = self.password
+		sign_in = br.submit() 
+
+	def readproduct(self,asin):
+		orders_html = br.open("https://sellercentral.amazon.co.jp/hz/inventory?asin=" + asin)
+		soup = BeautifulSoup(orders_html.read())
+		content = soup.find(attrs={"class":"a-bordered a-horizontal-stripes  mt-table"}).contents[1]
+		id1 = content.attrs["id"]
+		data = content.attrs["data-row-data"]
 
 class Product:
-	title = ""
-	price = {}
-	weight = ""
-	asin = ""
+	
 	def __init__(self,asin):
+		self.num = 0
+		self.lock = thread.allocate_lock()
 		self.asin = asin
+		self.title = ""
+		self.price = {}
+		self.weight = ""
 		[thread.start_new_thread(self.get_data,(x,)) for x in path.keys()]
 		#[{x:self.get_data(x,BeautifulSoup(download(path[x]+"o/ASIN/"+asin)))} for x in path.keys()]
-		print asin
+		print asin+" start"
+		while True:
+			self.lock.acquire()
+			if self.num >= len(path):
+				self.lock.release()
+				print asin+ " end"
+				return
+			self.lock.release()
 
 	def get_data(self,country):
-		soup = BeautifulSoup(download(path[country]+"o/ASIN/"+self.asin))
-		print country
+		try:
+			soup = BeautifulSoup(download(path[country]+"o/ASIN/"+self.asin))
+		except:
+			print("no found " + self.asin + " in " + country)
+			self.get_data_finish()
+			return -1
+
+		try:
+			self.price[country] = soup.find(id = "priceblock_ourprice").strings
+		except:
+			try:
+				self.price[country] = soup.find(id = "priceblock_saleprice").strings
+			except:
+				try:
+					print self.asin + " in " + country + " " +" ".join(soup.find(id = "availability").span.string.split())
+				except:
+					print "check money in "+self.asin+" at "+country
+		
 		if country == "jp":
-			pass
+			try:
+				self.weight = soup.find(attrs={"class":"shipping-weight"}).find(attrs={"class":"value"}).string
+			except:
+				self.weight = "no data"
+
+			try:
+				self.title = soup.find(id = "title_feature_div").string
+			except:
+				print "check title in "+self.asin+" at "+country
 			#self.title = soup.find(id = "title").contents
+		self.get_data_finish()
 		return 1
 
-class MyAdapter(requests.adapters.HTTPAdapter):
-	def init_poolmanager(self, connections, maxsize, block):
-		self.poolmanager = PoolManager(num_pools=connections, maxsize=maxsize, ssl_version=PROTOCOL_TLSv1)
+	def get_data_finish(self):
+		self.lock.acquire()
+		self.num = self.num + 1
+		self.lock.release()
 
 if  __name__ == '__main__':
-	#amazon = Amazon("jp", "abc")
-	# s = requests.session()
-	# s.UserAgent = "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/40.0.2214.111 Safari/537.36"
-	# s.mount('https://', MyAdapter())
-	# s.get('https://www.amazon.co.jp/gp/sign-in.html',  verify=False)
+	amazon = AmazonBuyer("jp", "nike+air+max")
+
+	# br = mechanize.Browser()  
+	# br.set_debug_http(True)
+	# br.set_handle_robots(False)  
+	# br.addheaders =   
 	
-	#login = s.get('https://sellercentral.amazon.co.jp/gp/homepage.html',  verify=False)
-	#soup = BeautifulSoup(login.content)
-	#widgetToken = soup.find(name = "widgetToken")['value']
-	#print widgetToken
-	#metadata1 = soup.find(name = "metadata1")['value']
-	#print metadata1
-	#data = {'username':'578044856@qq.com','password':'911526','widgetToken':widgetToken,'metadata1':metadata1}
-	#res=s.post('https://sellercentral.amazon.co.jp/ap/widget',data,  verify=False);
-	#print res.content
-
-	br = mechanize.Browser()  
-	br.set_debug_http(True)
-	br.set_handle_robots(False)  
-	br.addheaders = [("User-agent", "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.2.13) Gecko/20101206 Ubuntu/10.10 (maverick) Firefox/3.6.13"),
-				("Connection","keep-alive")]  
+	# sign_in = br.open('https://www.amazon.co.jp/gp/sign-in.html') 
 	
-	sign_in = br.open('https://www.amazon.co.jp/gp/sign-in.html') 
-	
-	br.select_form(name="signIn")  
-	br["email"] = '578044856@qq.com' 
-	br["password"] = '911526'
-	logged_in = br.submit() 
+	# br.select_form(name="signIn")  
+	# br["email"] = '578044856@qq.com' 
+	# br["password"] = '911526'
+	# logged_in = br.submit() 
 
-	orders_html = br.open("https://sellercentral.amazon.co.jp/hz/inventory?asin=B00B4MDR3U")
-	soup = BeautifulSoup(orders_html.read())
-	content = soup.find(attrs={"class":"a-bordered a-horizontal-stripes  mt-table"}).contents[1]
-	id1 = content.attrs["id"]
-	data = content.attrs["data-row-data"]
+	# orders_html = br.open("https://sellercentral.amazon.co.jp/hz/inventory?asin=B00B4MDR3U")
+	# soup = BeautifulSoup(orders_html.read())
+	# content = soup.find(attrs={"class":"a-bordered a-horizontal-stripes  mt-table"}).contents[1]
+	# id1 = content.attrs["id"]
+	# data = content.attrs["data-row-data"]
 
-	payload = {
-		"tableId":"myitable",
-		"updatedRecords":
-		[{
-			"recordId":id1,
-			"updatedFields":
-			[{
-				"fieldId":"quantity",
-				"changedValue":"50",
-				"beforeValue":"2"
-			}]
-		}],
-		"viewContext":
-		{
-			"action":"TABLE_SAVED",
-			"pageNumber":1,
-			"recordsPerPage":25,
-			"sortedColumnId":"Date",
-			"sortOrder":"DESCENDING",
-			"searchText":"B00B4MDR3U",
-			"tableId":"myitable",
-			"filters":[],
-			"clientState":
-			{
-				"recordsAboveTheFold":"25",
-				"enableMultiPageSelect":"true",
-				"confirmActionPageMaxRecords":"250",
-				"viewId":"DEFAULT"
-			}
-		}
-	}
-	print json.dumps(payload)
-	br.set_debug_http(True)
-	br.addheaders = [('Content-Type', 'application/json')]
-	br.open(mechanize.Request("https://sellercentral.amazon.co.jp/hz/inventory/save?ref_=xx_xx_save_xx",data=json.dumps(payload),headers={"Content-type":"application/json"}, ))
-	#br.open("https://sellercentral.amazon.co.jp/hz/inventory/save?ref_=xx_xx_save_xx", json.dumps(payload),headers={"Content-type":"application/json"}))
+	# payload = {
+	# 	"tableId":"myitable",
+	# 	"updatedRecords":
+	# 	[{
+	# 		"recordId":id1,
+	# 		"updatedFields":
+	# 		[{
+	# 			"fieldId":"quantity",
+	# 			"changedValue":"50",
+	# 			"beforeValue":"2"
+	# 		}]
+	# 	}],
+	# 	"viewContext":
+	# 	{
+	# 		"action":"TABLE_SAVED",
+	# 		"pageNumber":1,
+	# 		"recordsPerPage":25,
+	# 		"sortedColumnId":"Date",
+	# 		"sortOrder":"DESCENDING",
+	# 		"searchText":"B00B4MDR3U",
+	# 		"tableId":"myitable",
+	# 		"filters":[],
+	# 		"clientState":
+	# 		{
+	# 			"recordsAboveTheFold":"25",
+	# 			"enableMultiPageSelect":"true",
+	# 			"confirmActionPageMaxRecords":"250",
+	# 			"viewId":"DEFAULT"
+	# 		}
+	# 	}
+	# }
+	# print json.dumps(payload)
+	# br.set_debug_http(True)
+	# br.addheaders = [('Content-Type', 'application/json')]
+	# br.open(mechanize.Request("https://sellercentral.amazon.co.jp/hz/inventory/save?ref_=xx_xx_save_xx",data=json.dumps(payload),headers={"Content-type":"application/json"}, ))
 
-# 	cookiejar = br._ua_handlers["_cookies"].cookiejar
-# 	print cookiejar
-# #	s = requests.session()
-# #	s.cookies = cookiejar
-# #	s.UserAgent = "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.2.13) Gecko/20101206 Ubuntu/10.10 (maverick) Firefox/3.6.13"
-# #	print s.get('https://sellercentral.amazon.co.jp/gp/homepage.html',  verify=False).content
-
-
-# 	s = requests.Session()
-	
-# 	user_agent = "User-Agent:Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/40.0.2214.111 Safari/537.36" 
-# 	extra_headers = { 'User-Agent' : user_agent,"Content-Type" : "application/x-www-form-urlencoded" }
-# 	s.headers.update(extra_headers) 
-
-# 	r = s.get('https://www.amazon.co.jp/gp/sign-in.html', verify = False)
-# 	print r.cookies
-# 	soup = BeautifulSoup(r.content)
-# 	inputs = soup.find_all('input')
-
-# 	attributes = [i.attrs for i in inputs]
-# 	form_values = {}
-
-# 	for a in attributes:
-# 		print a.get('name')# + "   "+a.get('value')
-# 		form_values[a.get('name')] = a.get('value')
-
-# 	form_values['email'] = '578044856@qq.com'
-# 	form_values['password'] = "911526"
-# 	print s.headers
-# 	print s.cookies
-# 	s.cookies = cookiejar;
-# 	r = s.post( 'https://www.amazon.co.jp/ap/signin', data = form_values, verify = False, headers={"content-type" : "application/x-www-form-urlencoded","session-id-time":"2082726001l"})
-# 	print r.content 
-	
-# 	r = s.get('https://sellercentral.amazon.co.jp/gp/homepage.html', verify = False)
-# 	print r.content
