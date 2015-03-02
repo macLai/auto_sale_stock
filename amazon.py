@@ -55,49 +55,54 @@ class AmazonBuyer:
 	def read_category(self,soup):
 		category = soup.find(id = "refinements")
 		categoryList = [path[self.country]+item.a.attrs["href"] for item in category.find(attrs={"class":"forExpando"}).contents if item != "\n"]
-		categoryList.extend([path[self.country]+item.a.attrs["href"] for item in category.find(attrs={"class":"seeAllSmartRefDepartmentOpen"}).contents if item != "\n"])
+		try:
+			categoryList.extend([path[self.country]+item.a.attrs["href"] for item in category.find(attrs={"class":"seeAllSmartRefDepartmentOpen"}).contents if item != "\n"])
+		except:
+			pass
 
-		thread.start_new_thread(self.write_to_csv,())
+		# thread.start_new_thread(self.write_to_csv,())
 
-		while True:
-			if(len(categoryList) == 0):
-				return
-			self.lock_search.acquire()
-			if self.processNum <= 3:
-				thread.start_new_thread(self.new_SearchProcess,(categoryList.pop(),))
-			self.lock_search.release()
+		# while True:
+		# 	if(len(categoryList) == 0):
+		# 		return
+		# 	self.lock_search.acquire()
+		# 	if self.processNum <= 2:
+		# 		thread.start_new_thread(self.new_SearchProcess,(categoryList.pop(),))
+		# 	self.lock_search.release()
+
+		[self.new_SearchProcess(item) for item in categoryList]
 
 	def new_SearchProcess(self,url):
-		self.lock_search.acquire()
-		self.processNum = self.processNum + 1
-		self.lock_search.release()
+		# self.lock_search.acquire()
+		# self.processNum = self.processNum + 1
+		# self.lock_search.release()
+		print "search "+url
 
 		soup = BeautifulSoup(download(url))
 		while True:
 			self.read_listpage_item(soup)
 			ret,soup = self.next_page(soup)
 			if ret != 0:
-				self.lock_search.acquire()
-				self.processNum = self.processNum - 1
-				self.lock_search.release()
+				# self.lock_search.acquire()
+				# self.processNum = self.processNum - 1
+				# self.lock_search.release()
 				return
 
 	def write_to_csv(self):
-		output = open('data.csv', 'w+')
-		while True:
+		# while True:
 			product_list = []
-			self.lock_write_file.acquire()
+			# # self.lock_write_file.acquire()
 			if len(self.product_list)>0:
 				product_list = self.product_list
 				self.product_list = []
-			self.lock_write_file.release()
+			# # self.lock_write_file.release()
 
+			output = open('data.csv', 'a')
 			for product in product_list:
-				data = str(product.asin)+";"+str(product.weight)+";"+"\n"#+str(product.title)+"\n"
+				data = product.asin +";"+product.weight+";"+product.title.encode('utf-8')+"\n"
 				output.write(data)
 
-			time.sleep(2)
-		output.close()
+			output.close()
 
 			
 
@@ -106,9 +111,10 @@ class AmazonBuyer:
 
 		for item in productXMLList:
 			product = Product(item.attrs['data-asin'])
-			self.lock_write_file.acquire()
+			# self.lock_write_file.acquire()
 			self.product_list.append(product)
-			self.lock_write_file.release()
+			self.write_to_csv()
+			# self.lock_write_file.release()
 
 		return 1
 
@@ -182,10 +188,26 @@ class Product:
 				self.price[country] = soup.find(id = "priceblock_saleprice").strings
 			except:
 				try:
-					print self.asin + " in " + country + " " +" ".join(soup.find(id = "availability").span.string.split())
+					self.price[country] = soup.find(id = "buyingPriceValue").strings
 				except:
-					print "check money in "+self.asin+" at "+country
-		
+					try:
+						prices = soup.find(attrs = {"class":"a-nostyle a-button-list a-horizontal"}).findAll("span", attrs = {"class":"a-button-inner"})
+						if len(prices)>0:
+							self.price[country] = {}
+						for price in prices:
+							price_item = price.findAll("span")
+							self.price[country][price_item[0].string] = price_item[1].string
+					except:
+						self.price[country] = ""
+						print "check money in "+self.asin+" at "+country
+		if self.price[country]:
+			if type(self.price[country]) == str:
+				self.price[country] = self.fix_price(self.price[country])
+			elif type(self.price[country]) == dict:
+				for (key,item) in self.price[country].items():
+					self.price[country][key] = self.fix_price(item)
+		print self.price[country]
+
 		if country == "jp":
 			try:
 				self.weight = soup.find(attrs={"class":"shipping-weight"}).find(attrs={"class":"value"}).string
@@ -193,6 +215,7 @@ class Product:
 				self.weight = "no data"
 
 			try:
+				print soup.find(id = "title_feature_div")
 				self.title = soup.find(id = "title_feature_div").string
 			except:
 				print "check title in "+self.asin+" at "+country
@@ -200,13 +223,22 @@ class Product:
 		self.get_data_finish()
 		return 1
 
+	def fix_price(self,price):
+		try:
+			num = float(re.search(r'(\d+,*)*\d+', price ).group(0).replace(",",""))
+		except:
+			num = ""
+		return num
+
 	def get_data_finish(self):
 		self.lock.acquire()
 		self.num = self.num + 1
 		self.lock.release()
 
 if  __name__ == '__main__':
-	amazon = AmazonBuyer("jp", "nike+air+max")
+	print "start"
+	# amazon = AmazonBuyer("jp", "nike+air+max+14")
+	product = Product("123052309X")
 
 	# br = mechanize.Browser()  
 	# br.set_debug_http(True)
@@ -261,4 +293,3 @@ if  __name__ == '__main__':
 	# br.set_debug_http(True)
 	# br.addheaders = [('Content-Type', 'application/json')]
 	# br.open(mechanize.Request("https://sellercentral.amazon.co.jp/hz/inventory/save?ref_=xx_xx_save_xx",data=json.dumps(payload),headers={"Content-type":"application/json"}, ))
-
