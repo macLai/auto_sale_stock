@@ -1,7 +1,9 @@
+# coding: utf-8
 import sys
 import random
 import urllib2
 from bs4 import BeautifulSoup
+from bs4.element import NavigableString
 import re
 import time
 import thread
@@ -48,6 +50,7 @@ class AmazonBuyer:
 		self.product_list = []
 		self.processNum = 0
 
+		self.write_head()
 		data = download(path[self.country]+"s/field-keywords="+keyword)
 		soup = BeautifulSoup(data)
 		self.read_category(soup)
@@ -56,9 +59,14 @@ class AmazonBuyer:
 		category = soup.find(id = "refinements")
 		categoryList = [path[self.country]+item.a.attrs["href"] for item in category.find(attrs={"class":"forExpando"}).contents if item != "\n"]
 		try:
-			categoryList.extend([path[self.country]+item.a.attrs["href"] for item in category.find(attrs={"class":"seeAllSmartRefDepartmentOpen"}).contents if item != "\n"])
+			categoryList.extend([path[self.country]+item.a.attrs["href"] for item in category.find(id = "seeAllDepartmentOpen1").contents if item != "\n"])
+			print "seeAllDepartmentOpen1"
 		except:
-			pass
+			try:
+				categoryList.extend([path[self.country]+item.a.attrs["href"] for item in category.find(id = "seeAllDepartmentOpen").contents if item != "\n"])
+				print "seeAllDepartmentOpen"
+			except:
+				print "no others category"
 
 		# thread.start_new_thread(self.write_to_csv,())
 
@@ -88,6 +96,15 @@ class AmazonBuyer:
 				# self.lock_search.release()
 				return
 
+	def write_head(self):
+		output = open('data.csv', 'w')
+		data = "ASIN,WEIGHT,NAME"
+		for pathid in path.keys():
+			data += ","+pathid
+		data += "\n"
+		output.write(data)
+		output.close()
+
 	def write_to_csv(self):
 		# while True:
 			product_list = []
@@ -99,12 +116,23 @@ class AmazonBuyer:
 
 			output = open('data.csv', 'a')
 			for product in product_list:
-				data = product.asin +";"+product.weight+";"+product.title.encode('utf-8')+"\n"
+				try:
+					data = product.asin.encode('utf-8') + "," + product.weight.encode('utf-8') + "," + product.title.encode('utf-8')# + "\n"
+					for pathid in path.keys():
+						if type(product.price[pathid]) == float:
+							data += ","+str(product.price[pathid]*Unit.country_price_list[pathid])
+						elif type(product.price[pathid]) == dict:
+							data += ","
+							for (key,item) in product.price[pathid].items():
+								if item != "":
+									data += key.encode("utf-8")+":"+str(item*Unit.country_price_list[pathid])+";"
+						else:
+							data += ","
+					data += "\n"
+				except:
+					data = "check " + product.asin.encode('utf-8')
 				output.write(data)
-
 			output.close()
-
-			
 
 	def read_listpage_item(self,soup):
 		productXMLList = soup.findAll('li', {"class","s-result-item"})
@@ -178,17 +206,18 @@ class Product:
 			soup = BeautifulSoup(download(path[country]+"o/ASIN/"+self.asin))
 		except:
 			print("no found " + self.asin + " in " + country)
+			self.price[country] = ""
 			self.get_data_finish()
 			return -1
 
 		try:
-			self.price[country] = soup.find(id = "priceblock_ourprice").strings
+			self.price[country] = soup.find(id = "priceblock_ourprice").string
 		except:
 			try:
-				self.price[country] = soup.find(id = "priceblock_saleprice").strings
+				self.price[country] = soup.find(id = "priceblock_saleprice").string
 			except:
 				try:
-					self.price[country] = soup.find(id = "buyingPriceValue").strings
+					self.price[country] = soup.find(id = "buyingPriceValue").string
 				except:
 					try:
 						prices = soup.find(attrs = {"class":"a-nostyle a-button-list a-horizontal"}).findAll("span", attrs = {"class":"a-button-inner"})
@@ -200,13 +229,15 @@ class Product:
 					except:
 						self.price[country] = ""
 						print "check money in "+self.asin+" at "+country
-		if self.price[country]:
-			if type(self.price[country]) == str:
+
+		if self.price[country] != "":
+			if type(self.price[country]) == NavigableString:
 				self.price[country] = self.fix_price(self.price[country])
+				print self.price[country]
 			elif type(self.price[country]) == dict:
 				for (key,item) in self.price[country].items():
 					self.price[country][key] = self.fix_price(item)
-		print self.price[country]
+					print key+" "+str(self.price[country][key])
 
 		if country == "jp":
 			try:
@@ -215,17 +246,17 @@ class Product:
 				self.weight = "no data"
 
 			try:
-				print soup.find(id = "title_feature_div")
-				self.title = soup.find(id = "title_feature_div").string
+				self.title = soup.find(id = "productTitle").string.replace("\r","").replace("\n","").replace(",","")
 			except:
+				self.title = ""
 				print "check title in "+self.asin+" at "+country
-			#self.title = soup.find(id = "title").contents
+			print self.title.encode("utf-8")
 		self.get_data_finish()
 		return 1
 
 	def fix_price(self,price):
 		try:
-			num = float(re.search(r'(\d+,*)*\d+', price ).group(0).replace(",",""))
+			num = float(re.search(r'\d+(,?\d+)*.?\d+', price ).group(0).replace(",",""))
 		except:
 			num = ""
 		return num
@@ -235,10 +266,60 @@ class Product:
 		self.num = self.num + 1
 		self.lock.release()
 
+class Unit:
+	country_price_list = {
+		"cn" : 0,
+		"jp" : 1,
+		"us" : 0,
+		"uk" : 0,
+		"fr" : 0,
+		"de" : 0,
+		"es" : 0,
+		"it" : 0
+	}
+
+	def __init__(self):
+		list = ("CNY","USD","GBP","EUR")
+		Unit.country_price_list["cn"] = self.get_price("CNY")
+		Unit.country_price_list["us"] = self.get_price("USD")
+		Unit.country_price_list["uk"] = self.get_price("GBP")
+		Unit.country_price_list["fr"] = self.get_price("EUR")
+		Unit.country_price_list["de"] = Unit.country_price_list["fr"]
+		Unit.country_price_list["es"] = Unit.country_price_list["fr"]
+		Unit.country_price_list["it"] = Unit.country_price_list["fr"]
+
+	def get_price(self,item):
+		path = "https://www.google.com/finance/converter?a=1&from="+item+"&to=JPY"
+		soup = BeautifulSoup(download(path))
+		price_string = soup.find(attrs={"class":"bld"}).string
+		price = float(re.search(r'\d+(.)?\d+', price_string ).group(0).replace(",",""))
+		return price
+
+
 if  __name__ == '__main__':
+	if len(sys.argv) == 1:
+		print """about what you can do:
+xxx.exe country keyword
+
+POINT
+1.country_list:cn,jp,us,uk,fr,de,es,it
+2.keyword:if keywords are more than one,add "+" between two words
+		  
+example:xxx.exe us nike+air+max
+		"""
+		exit()
+	if len(sys.argv) != 3:
+		print "wrong keywords"
+		exit()
+	if sys.argv[1] not in path.keys():
+		print "wrong country"
+		exit()
 	print "start"
-	# amazon = AmazonBuyer("jp", "nike+air+max+14")
-	product = Product("123052309X")
+	unit = Unit()
+	print "exchange rate: ", Unit.country_price_list
+	print sys.argv[2]
+	amazon = AmazonBuyer(sys.argv[1], sys.argv[2].decode("Shift_JIS").encode("utf-8"))
+	# product = Product("B00TJE5ZB2")
 
 	# br = mechanize.Browser()  
 	# br.set_debug_http(True)
@@ -248,8 +329,8 @@ if  __name__ == '__main__':
 	# sign_in = br.open('https://www.amazon.co.jp/gp/sign-in.html') 
 	
 	# br.select_form(name="signIn")  
-	# br["email"] = '578044856@qq.com' 
-	# br["password"] = '911526'
+	# br["email"] = '1@qq.com' 
+	# br["password"] = '1'
 	# logged_in = br.submit() 
 
 	# orders_html = br.open("https://sellercentral.amazon.co.jp/hz/inventory?asin=B00B4MDR3U")
