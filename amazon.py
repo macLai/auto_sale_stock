@@ -105,6 +105,11 @@ class AmazonBuyer:
 		output.write(data)
 		output.close()
 
+	def write_error(self,data):
+		output = open('data.csv', 'a')
+		output.write(data+"\n")
+		output.close()
+
 	def write_to_csv(self):
 		# while True:
 			product_list = []
@@ -138,11 +143,14 @@ class AmazonBuyer:
 		productXMLList = soup.findAll('li', {"class","s-result-item"})
 
 		for item in productXMLList:
-			product = Product(item.attrs['data-asin'])
-			# self.lock_write_file.acquire()
-			self.product_list.append(product)
-			self.write_to_csv()
-			# self.lock_write_file.release()
+			try:
+				product = Product(item.attrs['data-asin'])
+				# self.lock_write_file.acquire()
+				self.product_list.append(product)
+				self.write_to_csv()
+				# self.lock_write_file.release()
+			except:
+				self.write_error("check "+item.attrs['data-asin'].encode('utf-8'))
 
 		return 1
 
