@@ -1,0 +1,26 @@
+$def with (is_working,page)
+
+$if is_working:
+	in Searching <form><input type="submit" value="stop"/></form>
+$else:
+	<form method="POST">
+		country:
+		<select name="country" value="jp">
+			<option value="jp">jp</option>
+			<option value="us">us</option>
+			<option value="cn">cn</option>
+			<option value="uk">uk</option>
+			<option value="fr">fr</option>
+			<option value="de">de</option>
+			<option value="es">es</option>
+			<option value="it">it</option>
+		</select>
+		keyword:
+		<input name="keyword" />
+		<input type="submit" />
+	</form>
+
+
+page:
+$for i in range(page):
+	<a href="/$i">$i</a>
