@@ -10,6 +10,8 @@ import time
 import thread
 import mechanize
 import json
+import os
+import sqlite3 as db
 
 path = {
 	"cn" : "http://www.amazon.cn/",
@@ -51,7 +53,9 @@ class AmazonBuyer:
 		self.product_list = []
 		self.processNum = 0
 		self.categoryList = []
+		self.is_searching = False
 
+		unit = Unit()
 		self.write_head()
 		data = download(path[self.country]+"s/field-keywords="+keyword)
 		soup = BeautifulSoup(data)
@@ -59,37 +63,33 @@ class AmazonBuyer:
 
 	def read_category(self,soup):
 		category = soup.find(id = "refinements")
-		self.categoryList = [path[self.country]+item.a.attrs["href"] for item in category.find(attrs={"class":"forExpando"}).contents if item != "\n"]
+		self.categoryList = [{"name":item.a.span.string,"path":path[self.country]+item.a.attrs["href"]} for item in category.find(attrs={"class":"forExpando"}).contents if item != "\n" and item.a.span.string != "-"]
 		try:
-			self.categoryList.extend([path[self.country]+item.a.attrs["href"] for item in category.find(id = "seeAllDepartmentOpen1").contents if item != "\n"])
+			self.categoryList.extend([{"name":item.a.span.string,"path":path[self.country]+item.a.attrs["href"]} for item in category.find(id = "seeAllDepartmentOpen1").contents if item != "\n" and item.a.span.string != "-"])
 			print "seeAllDepartmentOpen1"
 		except:
 			try:
-				self.categoryList.extend([path[self.country]+item.a.attrs["href"] for item in category.find(id = "seeAllDepartmentOpen").contents if item != "\n"])
+				self.categoryList.extend([{"name":item.a.span.string,"path":path[self.country]+item.a.attrs["href"]} for item in category.find(id = "seeAllDepartmentOpen").contents if item != "\n" and item.a.span.string != "-"])
 				print "seeAllDepartmentOpen"
 			except:
 				print "no others category"
 
 		# thread.start_new_thread(self.write_to_csv,())
 
-		# while True:
-		# 	if(len(categoryList) == 0):
-		# 		return
-		# 	self.lock_search.acquire()
-		# 	if self.processNum <= 2:
-		# 		thread.start_new_thread(self.new_SearchProcess,(categoryList.pop(),))
-		# 	self.lock_search.release()
-
-		# [self.new_SearchProcess(item) for item in categoryList]
-
 	def new_SearchProcess(self,url):
 		# self.lock_search.acquire()
 		# self.processNum = self.processNum + 1
 		# self.lock_search.release()
+		self.is_searching = True
 		print "search "+url
+		if url == "":
+			for category in self.categoryList:
+				self.new_SearchProcess(category.path)
 
 		soup = BeautifulSoup(download(url))
 		while True:
+			if self.is_searching == False:
+				return
 			self.read_listpage_item(soup)
 			ret,soup = self.next_page(soup)
 			if ret != 0:
@@ -97,6 +97,7 @@ class AmazonBuyer:
 				# self.processNum = self.processNum - 1
 				# self.lock_search.release()
 				return
+		self.is_searching = False
 
 	def write_head(self):
 		output = open('data.csv', 'w')
@@ -141,15 +142,53 @@ class AmazonBuyer:
 				output.write(data)
 			output.close()
 
+	def write_to_db(self):
+		sql = Sqldb()
+		product_list = []
+		price = {}
+		if len(self.product_list)>0:
+			product_list = self.product_list
+			self.product_list = []
+		for product in product_list:
+			sql.cu.execute("""select count(*) from amazon_price_data""")
+			for num in sql.cu:
+				id = num[0]
+			asin = product.asin.encode('utf-8')
+			weight = product.weight.encode('utf-8')
+			title = product.title.encode('utf-8')
+			for pathid in path.keys():
+				if type(product.price[pathid]) == float:
+					price[pathid] = product.price[pathid]*Unit.country_price_list[pathid]
+				elif type(product.price[pathid]) == dict:
+					if price[pathid] != product.price[pathid][0]:
+						price[pathid] = product.price[pathid][0]*Unit.country_price_list[pathid]
+					else:
+						price[pathid] = 0
+				else:
+					price[pathid] = 0
+			sqldata = "INSERT INTO amazon_price_data (ID,ASIN,NAME,WEIGHT,CN,JP,US,UK,FR,DE,ES,IT)"+\
+				"VALUES ("+id+","+"'"+asin+"','"+title+"','"+weight+"',"+str(price["cn"])+","+str(price["jp"])+","+str(price["us"])+str(price["uk"])+","+str(price["fr"])+","+str(price["de"])+","+str(price["es"])+","+str(price["it"])+")"
+			sql.cu.execute(sqldata)
+			sql.cu.commit()
+
+
+			
+			
+			
+			
+			
+
 	def read_listpage_item(self,soup):
 		productXMLList = soup.findAll('li', {"class","s-result-item"})
 
 		for item in productXMLList:
 			try:
+				if self.is_searching == False:
+					return
 				product = Product(item.attrs['data-asin'])
 				# self.lock_write_file.acquire()
 				self.product_list.append(product)
-				self.write_to_csv()
+				self.write_to_db()
 				# self.lock_write_file.release()
 			except:
 				self.write_error("check "+item.attrs['data-asin'].encode('utf-8'))
@@ -310,6 +349,27 @@ class Unit:
 		price = float(re.search(r'\d+(.)?\d+', price_string ).group(0).replace(",",""))
 		return price
 
+class Sqldb:
+	def __init__(self):
+		if os.path.exists("amazon.db"):
+			self.conn = db.connect("amazon.db")
+			self.cu = self.conn.cursor()
+		else:
+			self.conn = db.connect("amazon.db")
+			self.cu = self.conn.cursor()
+			self.cu.execute("""create table amazon_price_data(
+				ID INT PRIMARY KEY     NOT NULL,
+				ASIN TEXT,
+				NAME TEXT,
+				WEIGHT TEXT,
+				CN REAL,
+				JP REAL,
+				US REAL,
+				UK REAL,
+				FR REAL,
+				DE REAL,
+				ES REAL,
+				IT REAL) """)
 
 if  __name__ == '__main__':
 # 	if len(sys.argv) == 1:
