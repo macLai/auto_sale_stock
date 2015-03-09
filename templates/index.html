@@ -1,8 +1,8 @@
-$def with (is_working,page)
+$def with (is_working,page,category,search_data)
 
-$if is_working:
-	in Searching <form><input type="submit" value="stop"/></form>
-$else:
+$if is_working == 1:
+	in Searching <form><input type="hidden" name="stop" value="true" /><input type="submit" value="stop"/></form>
+$elif is_working == 0:
 	<form method="POST">
 		country:
 		<select name="country" value="jp">
@@ -19,8 +19,19 @@ $else:
 		<input name="keyword" />
 		<input type="submit" />
 	</form>
-
-
+$else:
+	<form method="POST">
+		catecory:
+		<select name="category" value="CANCEL">
+			$:category
+		</select>
+		<input type="submit"/>
+	</form>
+<br />
 page:
 $for i in range(page):
 	<a href="/$i">$i</a>
+
+<table>
+	$:search_data
+</table>
