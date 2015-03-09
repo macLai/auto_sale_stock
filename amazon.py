@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # coding: utf-8
 import sys
 import random
@@ -49,6 +50,7 @@ class AmazonBuyer:
 		self.keyword = keyword
 		self.product_list = []
 		self.processNum = 0
+		self.categoryList = []
 
 		self.write_head()
 		data = download(path[self.country]+"s/field-keywords="+keyword)
@@ -57,13 +59,13 @@ class AmazonBuyer:
 
 	def read_category(self,soup):
 		category = soup.find(id = "refinements")
-		categoryList = [path[self.country]+item.a.attrs["href"] for item in category.find(attrs={"class":"forExpando"}).contents if item != "\n"]
+		self.categoryList = [path[self.country]+item.a.attrs["href"] for item in category.find(attrs={"class":"forExpando"}).contents if item != "\n"]
 		try:
-			categoryList.extend([path[self.country]+item.a.attrs["href"] for item in category.find(id = "seeAllDepartmentOpen1").contents if item != "\n"])
+			self.categoryList.extend([path[self.country]+item.a.attrs["href"] for item in category.find(id = "seeAllDepartmentOpen1").contents if item != "\n"])
 			print "seeAllDepartmentOpen1"
 		except:
 			try:
-				categoryList.extend([path[self.country]+item.a.attrs["href"] for item in category.find(id = "seeAllDepartmentOpen").contents if item != "\n"])
+				self.categoryList.extend([path[self.country]+item.a.attrs["href"] for item in category.find(id = "seeAllDepartmentOpen").contents if item != "\n"])
 				print "seeAllDepartmentOpen"
 			except:
 				print "no others category"
@@ -78,7 +80,7 @@ class AmazonBuyer:
 		# 		thread.start_new_thread(self.new_SearchProcess,(categoryList.pop(),))
 		# 	self.lock_search.release()
 
-		[self.new_SearchProcess(item) for item in categoryList]
+		# [self.new_SearchProcess(item) for item in categoryList]
 
 	def new_SearchProcess(self,url):
 		# self.lock_search.acquire()
@@ -256,8 +258,13 @@ class Product:
 			try:
 				self.title = soup.find(id = "productTitle").string.replace("\r","").replace("\n","").replace(",","")
 			except:
-				self.title = ""
-				print "check title in "+self.asin+" at "+country
+				try:
+					titles = soup.find(id = "btAsinTitle").strings
+					for title in titles:
+						self.title += title
+				except:
+					self.title = ""
+					print "check title in "+self.asin+" at "+country
 			print self.title.encode("utf-8")
 		self.get_data_finish()
 		return 1
@@ -305,28 +312,44 @@ class Unit:
 
 
 if  __name__ == '__main__':
-	if len(sys.argv) == 1:
-		print """about what you can do:
-xxx.exe country keyword
+# 	if len(sys.argv) == 1:
+# 		print """about what you can do:
+# xxx.exe country keyword
 
-POINT
-1.country_list:cn,jp,us,uk,fr,de,es,it
-2.keyword:if keywords are more than one,add "+" between two words
+# POINT
+# 1.country_list:cn,jp,us,uk,fr,de,es,it
+# 2.keyword:if keywords are more than one,add "+" between two words
 		  
-example:xxx.exe us nike+air+max
-		"""
-		exit()
-	if len(sys.argv) != 3:
-		print "wrong keywords"
-		exit()
-	if sys.argv[1] not in path.keys():
-		print "wrong country"
-		exit()
-	print "start"
+# example:xxx.exe us nike+air+max
+# 		"""
+# 		exit()
+# 	if len(sys.argv) != 3:
+# 		print "wrong keywords"
+# 		exit()
+# 	if sys.argv[1] not in path.keys():
+# 		print "wrong country"
+# 		exit()
+# 	print "start"
+# 	unit = Unit()
+# 	print "exchange rate: ", Unit.country_price_list
+# 	print sys.argv[2]
+	while 1:
+		country = raw_input('Enter Country Code(Ex:us,jp):').lower()
+		if country in path.keys():
+			break
+		print "wrong code"
+
+	keyword = raw_input('Enter Keyword(Ex:nike+air+max):').replace(" ","+")
+
+	try:
+		keyword = keyword.decode("Shift_JIS").encode("utf-8")
+	except:
+		keyword = keyword
+
 	unit = Unit()
 	print "exchange rate: ", Unit.country_price_list
-	print sys.argv[2]
-	amazon = AmazonBuyer(sys.argv[1], sys.argv[2].decode("Shift_JIS").encode("utf-8"))
+
+	amazon = AmazonBuyer(country, keyword)
 	# product = Product("B00TJE5ZB2")
 
 	# br = mechanize.Browser()  
