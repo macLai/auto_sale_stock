@@ -5,9 +5,10 @@ import web
 import amazon
 import sqlite3 as db
 from amazon import Sqldb
+import urllib
 
 urls = (
-  "/(.*)", "index"
+  "/(\d*)", "index"
 )
 
 render = web.template.render('templates')
@@ -17,7 +18,7 @@ class index:
 	def GET(self, path):
 		sql = Sqldb()
 		category = ""
-		print "get"
+		print "get "+path
 		sql.cu.execute("""select count(*) from amazon_price_data""")
 		for num in sql.cu:
 			sql_num = num[0]
@@ -31,6 +32,7 @@ class index:
 				for i in range(1,12):
 					search_data += "<tr>"+ data_list[i]+"</tr>"
 				search_data += "</td>"
+				print search_data
 
 		if ZN.amazonBuyer == None:
 			is_searching = 0
@@ -49,20 +51,22 @@ class index:
 		for key,word in [group.split("=") for group in data.split("&")]:
 			keylist[key] = word
 		if "country" in keylist.keys():
-			if keylist["country"].replace(" ","") != "":
+			if keylist["keyword"].replace(" ","") != "":
 				ZN.amazonBuyer = amazon.AmazonBuyer(keylist["country"],keylist["keyword"])
+				
 		if "category" in keylist.keys():
 			if keylist["category"] == "cancel":
 				ZN.amazonBuyer = None
 			elif keylist["category"] == "all":
-				thread.start_new_thread(ZN.amazonBuyer.new_SearchProcess,("",))
+				
+				ZN().fork("")
 			else:
-				print keylist["category"]
-				print "start_new_thread"
-				thread.start_new_thread(ZN.amazonBuyer.new_SearchProcess,(keylist["category"],))
+				
+				
+				ZN().fork(urllib.unquote(keylist["category"]))
 		if "stop" in keylist.keys():
 			if ZN.child != 0:
-				os.kill( ZN.child, signal.CTRL_BREAK_EVENT)
+				# os.kill( ZN.child, signal.CTRL_BREAK_EVENT)
 				ZN.amazonBuyer = None
 		raise web.seeother('/')
 
@@ -71,14 +75,19 @@ class ZN:
 	child = 0
 	def fork(self,url):
 		print "fork start"
-		child_pid = os.fork()
-		if child_pid == 0:
-			print "i am child"
-			ZN.amazonBuyer.new_SearchProcess(url)
-			exit()
-		else:
-			print "father = ",child_pid
-			ZN.child = child_pid
+		# thread.start_new_thread(ZN.amazonBuyer.new_SearchProcess,(url,))
+		return
+		try:
+			child_pid = os.fork()
+			if child_pid == 0:
+				print "i am child"
+				ZN.amazonBuyer.new_SearchProcess(url)
+				exit()
+			else:
+				print "father = ",child_pid
+				ZN.child = child_pid
+		except:
+			thread.start_new_thread(ZN.amazonBuyer.new_SearchProcess,(url,))
 
 
 

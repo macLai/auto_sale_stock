@@ -142,34 +142,35 @@ class AmazonBuyer:
 				output.write(data)
 			output.close()
 
-	def write_to_db(self):
+	def write_to_db(self, product):
 		sql = Sqldb()
 		product_list = []
 		price = {}
-		if len(self.product_list)>0:
-			product_list = self.product_list
-			self.product_list = []
-		for product in product_list:
-			sql.cu.execute("""select count(*) from amazon_price_data""")
-			for num in sql.cu:
-				id = num[0]
-			asin = product.asin.encode('utf-8')
-			weight = product.weight.encode('utf-8')
-			title = product.title.encode('utf-8')
-			for pathid in path.keys():
-				if type(product.price[pathid]) == float:
-					price[pathid] = product.price[pathid]*Unit.country_price_list[pathid]
-				elif type(product.price[pathid]) == dict:
-					if price[pathid] != product.price[pathid][0]:
-						price[pathid] = product.price[pathid][0]*Unit.country_price_list[pathid]
-					else:
-						price[pathid] = 0
+		sql.cu.execute("""select count(*) from amazon_price_data""")
+		for num in sql.cu:
+			id1 = num[0]
+		print id1
+		asin = product.asin.encode('utf-8')
+		print asin
+		weight = product.weight.encode('utf-8')
+		print weight
+		title = product.title.encode('utf-8')
+		print title
+		for pathid in path.keys():
+			if type(product.price[pathid]) == float:
+				price[pathid] = product.price[pathid]*Unit.country_price_list[pathid]
+			elif type(product.price[pathid]) == dict:
+				if price[pathid] != product.price[pathid][0]:
+					price[pathid] = product.price[pathid][0]*Unit.country_price_list[pathid]
 				else:
 					price[pathid] = 0
-			sqldata = "INSERT INTO amazon_price_data (ID,ASIN,NAME,WEIGHT,CN,JP,US,UK,FR,DE,ES,IT)"+\
-				"VALUES ("+id+","+"'"+asin+"','"+title+"','"+weight+"',"+str(price["cn"])+","+str(price["jp"])+","+str(price["us"])+str(price["uk"])+","+str(price["fr"])+","+str(price["de"])+","+str(price["es"])+","+str(price["it"])+")"
-			sql.cu.execute(sqldata)
-			sql.cu.commit()
+			else:
+				price[pathid] = 0
+			print pathid+"'s price = "+ str(price[pathid])
+		sqldata = "insert info amazon_price_data (ID,ASIN,NAME,WEIGHT,CN,JP,US,UK,FR,DE,ES,IT) values ("+str(id1)+","+"'"+asin+"','"+title+"','"+weight+"',"+str(price["cn"])+","+str(price["jp"])+","+str(price["us"])+str(price["uk"])+","+str(price["fr"])+","+str(price["de"])+","+str(price["es"])+","+str(price["it"])+")"
+		print sqldata
+		sql.cu.execute(sqldata)
+		sql.cu.commit()
 
 
 			
@@ -187,8 +188,8 @@ class AmazonBuyer:
 					return
 				product = Product(item.attrs['data-asin'])
 				# self.lock_write_file.acquire()
-				self.product_list.append(product)
-				self.write_to_db()
+				# self.product_list.append(product)
+				self.write_to_db(product)
 				# self.lock_write_file.release()
 			except:
 				self.write_error("check "+item.attrs['data-asin'].encode('utf-8'))
@@ -281,11 +282,11 @@ class Product:
 
 		if self.price[country] != "":
 			if type(self.price[country]) == NavigableString:
-				self.price[country] = self.fix_price(self.price[country])
+				self.price[country] = self.fix_price(self.price[country], country)
 				print self.price[country]
 			elif type(self.price[country]) == dict:
 				for (key,item) in self.price[country].items():
-					self.price[country][key] = self.fix_price(item)
+					self.price[country][key] = self.fix_price(item, country)
 					print key+" "+str(self.price[country][key])
 
 		if country == "jp":
@@ -308,9 +309,12 @@ class Product:
 		self.get_data_finish()
 		return 1
 
-	def fix_price(self,price):
+	def fix_price(self,price,country):
 		try:
-			num = float(re.search(r'\d+(,?\d+)*.?\d+', price ).group(0).replace(",",""))
+			if country == "jp" or country == "cn" or country == "us":
+				num = float(re.search(r'\d+(,?\d+)*.?\d+', price ).group(0).replace(",",""))
+			else:
+				num = float(re.search(r'\d+(,?\d+)*.?\d+', price ).group(0).replace(".","").replace(",",""))
 		except:
 			num = ""
 		return num
