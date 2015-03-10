@@ -30,8 +30,9 @@ $else:
 <br />
 page:
 $for i in range(page):
-	<a href="/$i">$i</a>
+	<a href="/$(i+1)">$(i+1)</a>
 
-<table>
+<br />
+<table  border="1">
 	$:search_data
 </table>
