@@ -167,17 +167,13 @@ class AmazonBuyer:
 			else:
 				price[pathid] = 0
 			print pathid+"'s price = "+ str(price[pathid])
-		sqldata = "insert info amazon_price_data (ID,ASIN,NAME,WEIGHT,CN,JP,US,UK,FR,DE,ES,IT) values ("+str(id1)+","+"'"+asin+"','"+title+"','"+weight+"',"+str(price["cn"])+","+str(price["jp"])+","+str(price["us"])+str(price["uk"])+","+str(price["fr"])+","+str(price["de"])+","+str(price["es"])+","+str(price["it"])+")"
+		sqldata = "insert into amazon_price_data (ID,ASIN,NAME,WEIGHT,CN,JP,US,UK,FR,DE,ES,IT) values ("+str(id1)+","+"'"+asin+"','"+title+"','"+weight+"',"+str(price["cn"])+","+str(price["jp"])+","+str(price["us"])+","+str(price["uk"])+","+str(price["fr"])+","+str(price["de"])+","+str(price["es"])+","+str(price["it"])+");"
 		print sqldata
-		sql.cu.execute(sqldata)
-		sql.cu.commit()
-
-
-			
-			
-			
-			
-			
+		try:
+			sql.cu.execute(sqldata)
+		except sqlite3.Error,e:
+			print e.args[0]
+		sql.cu.close() 
 
 	def read_listpage_item(self,soup):
 		productXMLList = soup.findAll('li', {"class","s-result-item"})
@@ -311,10 +307,10 @@ class Product:
 
 	def fix_price(self,price,country):
 		try:
-			if country == "jp" or country == "cn" or country == "us":
+			if country == "jp" or country == "cn" or country == "us" or country == "uk":
 				num = float(re.search(r'\d+(,?\d+)*.?\d+', price ).group(0).replace(",",""))
 			else:
-				num = float(re.search(r'\d+(,?\d+)*.?\d+', price ).group(0).replace(".","").replace(",",""))
+				num = float(re.search(r'\d+(,?\d+)*.?\d+', price ).group(0).replace(".","").replace(",","."))
 		except:
 			num = ""
 		return num
