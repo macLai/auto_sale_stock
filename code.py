@@ -25,13 +25,13 @@ class index:
 			print sql_num
 		if path == "":
 			path = "1"
-		sql.cu.execute("select * from amazon_price_data where ID<"+str(int(path)*100)+" AND ID>"+str(int(path)*100-100))
+		sql.cu.execute("select * from amazon_price_data limit 100 OFFSET "+str(int(path)*100-100))
 		search_data = ""
 		for data_list in sql.cu:
-				search_data += "<td>"
+				search_data += "<tr>"
 				for i in range(1,12):
-					search_data += "<tr>"+ data_list[i]+"</tr>"
-				search_data += "</td>"
+					search_data += "<td>"+ str(data_list[i])+"</td>"
+				search_data += "</tr>"
 				print search_data
 
 		if ZN.amazonBuyer == None:
@@ -43,7 +43,7 @@ class index:
 				category += '<option value="'+cate["path"]+'">'+cate["name"]+'</option>'
 		else:
 			is_searching = 1
-		return render.index(is_searching,int(sql_num/100),category,search_data)
+		return render.index(is_searching,int(sql_num/100)+1,category,search_data)
 
 	def POST(self, a):
 		data = web.data()
@@ -76,7 +76,7 @@ class ZN:
 	def fork(self,url):
 		print "fork start"
 		# thread.start_new_thread(ZN.amazonBuyer.new_SearchProcess,(url,))
-		return
+		# return
 		try:
 			child_pid = os.fork()
 			if child_pid == 0:
