@@ -68,6 +68,7 @@ class index:
 		if "stop" in keylist.keys():
 			if ZN.amazonBuyer.is_searching != False:
 				# os.kill( ZN.child, signal.CTRL_BREAK_EVENT)
+				ZN.amazonBuyer.is_searching = False
 				ZN.amazonBuyer = None
 		raise web.seeother('/')
 
@@ -75,6 +76,13 @@ class ZN:
 	amazonBuyer = None
 	def fork(self,url):
 		print "fork start"
+
+		sql = Sqldb()
+		try:
+			sql.cu.execute("delete from amazon_price_data;")
+			sql.conn.commit()
+		except db.Error,e:
+			print e.args[0]
 		thread.start_new_thread(ZN.amazonBuyer.new_SearchProcess,(url,))
 		return
 		# try:
