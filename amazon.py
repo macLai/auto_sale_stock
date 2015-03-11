@@ -66,11 +66,9 @@ class AmazonBuyer:
 		self.categoryList = [{"name":item.a.span.string,"path":path[self.country]+item.a.attrs["href"]} for item in category.find(attrs={"class":"forExpando"}).contents if item != "\n" and item.a.span.string != "-"]
 		try:
 			self.categoryList.extend([{"name":item.a.span.string,"path":path[self.country]+item.a.attrs["href"]} for item in category.find(id = "seeAllDepartmentOpen1").contents if item != "\n" and item.a.span.string != "-"])
-			print "seeAllDepartmentOpen1"
 		except:
 			try:
 				self.categoryList.extend([{"name":item.a.span.string,"path":path[self.country]+item.a.attrs["href"]} for item in category.find(id = "seeAllDepartmentOpen").contents if item != "\n" and item.a.span.string != "-"])
-				print "seeAllDepartmentOpen"
 			except:
 				print "no others category"
 
@@ -88,15 +86,16 @@ class AmazonBuyer:
 
 		soup = BeautifulSoup(download(url))
 		while True:
-			if self.is_searching == False:
-				return
 			self.read_listpage_item(soup)
+			if self.is_searching == False:
+				print "self.is_searching == False"
+				break
 			ret,soup = self.next_page(soup)
 			if ret != 0:
 				# self.lock_search.acquire()
 				# self.processNum = self.processNum - 1
 				# self.lock_search.release()
-				return
+				break
 		self.is_searching = False
 
 	def write_head(self):
@@ -109,9 +108,11 @@ class AmazonBuyer:
 		output.close()
 
 	def write_error(self,data):
-		output = open('data.csv', 'a')
-		output.write(data+"\n")
-		output.close()
+		try:
+			sql.cu.execute("insert into amazon_price_data (ASIN,NAME) values ('"+data+"', 'check bug please')")
+			sql.conn.commit()
+		except db.Error,e:
+			print e.args[0]
 
 	def write_to_csv(self):
 		# while True:
@@ -146,16 +147,9 @@ class AmazonBuyer:
 		sql = Sqldb()
 		product_list = []
 		price = {}
-		sql.cu.execute("""select count(*) from amazon_price_data""")
-		for num in sql.cu:
-			id1 = num[0]
-		print id1
 		asin = product.asin.encode('utf-8')
-		print asin
 		weight = product.weight.encode('utf-8')
-		print weight
 		title = product.title.encode('utf-8')
-		print title
 		for pathid in path.keys():
 			if type(product.price[pathid]) == float:
 				price[pathid] = product.price[pathid]*Unit.country_price_list[pathid]
@@ -166,12 +160,11 @@ class AmazonBuyer:
 					price[pathid] = 0
 			else:
 				price[pathid] = 0
-			print pathid+"'s price = "+ str(price[pathid])
-		sqldata = "insert into amazon_price_data (ID,ASIN,NAME,WEIGHT,CN,JP,US,UK,FR,DE,ES,IT) values ("+str(id1)+","+"'"+asin+"','"+title+"','"+weight+"',"+str(price["cn"])+","+str(price["jp"])+","+str(price["us"])+","+str(price["uk"])+","+str(price["fr"])+","+str(price["de"])+","+str(price["es"])+","+str(price["it"])+");"
-		print sqldata
+		sqldata = "insert into amazon_price_data (ASIN,NAME,WEIGHT,CN,JP,US,UK,FR,DE,ES,IT) values ('"+asin+"','"+title+"','"+weight+"',"+str(price["cn"])+","+str(price["jp"])+","+str(price["us"])+","+str(price["uk"])+","+str(price["fr"])+","+str(price["de"])+","+str(price["es"])+","+str(price["it"])+");"
 		try:
 			sql.cu.execute(sqldata)
-		except sqlite3.Error,e:
+			sql.conn.commit()
+		except db.Error,e:
 			print e.args[0]
 		sql.cu.close() 
 
@@ -181,15 +174,16 @@ class AmazonBuyer:
 		for item in productXMLList:
 			try:
 				if self.is_searching == False:
+					print "read_listpage_item self.is_searching == False"
 					return
+				else:
+					print "read_listpage_item self.is_searching == True"
 				product = Product(item.attrs['data-asin'])
-				# self.lock_write_file.acquire()
-				# self.product_list.append(product)
+				self.lock_write_file.acquire()
 				self.write_to_db(product)
-				# self.lock_write_file.release()
+				self.lock_write_file.release()
 			except:
-				self.write_error("check "+item.attrs['data-asin'].encode('utf-8'))
-
+				self.write_error(item.attrs['data-asin'].encode('utf-8'))
 		return 1
 
 	def next_page(self,soup):
@@ -240,12 +234,9 @@ class Product:
 		#[{x:self.get_data(x,BeautifulSoup(download(path[x]+"o/ASIN/"+asin)))} for x in path.keys()]
 		print asin+" start"
 		while True:
-			self.lock.acquire()
 			if self.num >= len(path):
-				self.lock.release()
 				print asin+ " end"
 				return
-			self.lock.release()
 
 	def get_data(self,country):
 		try:
@@ -274,16 +265,13 @@ class Product:
 							self.price[country][price_item[0].string] = price_item[1].string
 					except:
 						self.price[country] = ""
-						print "check money in "+self.asin+" at "+country
 
 		if self.price[country] != "":
 			if type(self.price[country]) == NavigableString:
 				self.price[country] = self.fix_price(self.price[country], country)
-				print self.price[country]
 			elif type(self.price[country]) == dict:
 				for (key,item) in self.price[country].items():
 					self.price[country][key] = self.fix_price(item, country)
-					print key+" "+str(self.price[country][key])
 
 		if country == "jp":
 			try:
@@ -300,8 +288,6 @@ class Product:
 						self.title += title
 				except:
 					self.title = ""
-					print "check title in "+self.asin+" at "+country
-			print self.title.encode("utf-8")
 		self.get_data_finish()
 		return 1
 
@@ -358,8 +344,7 @@ class Sqldb:
 			self.conn = db.connect("amazon.db")
 			self.cu = self.conn.cursor()
 			self.cu.execute("""create table amazon_price_data(
-				ID INT PRIMARY KEY     NOT NULL,
-				ASIN TEXT,
+				ASIN TEXT PRIMARY KEY     NOT NULL,
 				NAME TEXT,
 				WEIGHT TEXT,
 				CN REAL,
@@ -369,7 +354,8 @@ class Sqldb:
 				FR REAL,
 				DE REAL,
 				ES REAL,
-				IT REAL) """)
+				IT REAL,
+				MARGIN REAL) """)
 
 if  __name__ == '__main__':
 # 	if len(sys.argv) == 1:
