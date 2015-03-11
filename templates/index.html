@@ -25,6 +25,8 @@ $elif is_working == 0:
 		<input name="keyword" />
 		<input type="submit" />
 	</form>
+	<br />
+	<form  method="POST"><input type="hidden" name="output" value="true" /><input type="submit" value="output"/></form>
 $else:
 	<form method="POST">
 		catecory:
@@ -34,8 +36,10 @@ $else:
 		<input type="submit"/>
 	</form>
 <br />
+$page results
+<br />
 page:
-$for i in range(page):
+$for i in range(int(page/100)+1):
 	<a href="/$(i+1)">$(i+1)</a>
 
 <br />
@@ -49,6 +53,7 @@ $for i in range(page):
 		<th>DE</th>
 		<th>ES</th>
 		<th>IT</th>
+		<th>JP-MinPrice</th>
 	$:search_data
 </table>
 </body>

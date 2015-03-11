@@ -6,6 +6,7 @@ import amazon
 import sqlite3 as db
 from amazon import Sqldb
 import urllib
+import csv
 
 urls = (
   "/(\d*)", "index"
@@ -18,11 +19,9 @@ class index:
 	def GET(self, path):
 		sql = Sqldb()
 		category = ""
-		print "get "+path
 		sql.cu.execute("""select count(*) from amazon_price_data""")
 		for num in sql.cu:
 			sql_num = num[0]
-			print sql_num
 		if path == "":
 			path = "1"
 		sql.cu.execute("select * from amazon_price_data limit 100 OFFSET "+str(int(path)*100-100))
@@ -44,7 +43,7 @@ class index:
 				category += '<option value="'+cate["path"]+'">'+cate["name"]+'</option>'
 		else:
 			is_searching = 1
-		return render.index(is_searching,int(sql_num/100)+1,category,search_data)
+		return render.index(is_searching,sql_num,category,search_data)
 
 	def POST(self, a):
 		data = web.data()
@@ -53,7 +52,7 @@ class index:
 			keylist[key] = word
 		if "country" in keylist.keys():
 			if keylist["keyword"].replace(" ","") != "":
-				ZN.amazonBuyer = amazon.AmazonBuyer(keylist["country"],keylist["keyword"])
+				ZN.amazonBuyer = amazon.AmazonBuyer(keylist["country"],keylist["keyword"].replace(" ","+"))
 				
 		if "category" in keylist.keys():
 			if keylist["category"] == "cancel":
@@ -62,27 +61,46 @@ class index:
 				
 				ZN().fork("")
 			else:
-				
-				
 				ZN().fork(urllib.unquote(keylist["category"]))
 		if "stop" in keylist.keys():
 			if ZN.amazonBuyer.is_searching != False:
 				# os.kill( ZN.child, signal.CTRL_BREAK_EVENT)
 				ZN.amazonBuyer.is_searching = False
 				ZN.amazonBuyer = None
+		if "output" in keylist.keys():
+			sql = Sqldb()
+			try:
+				self.output_csv()
+			except db.Error,e:
+				logging.warning( e.args[0])
 		raise web.seeother('/')
+
+	def output_csv(self):
+		sql = Sqldb()
+		try:
+			sql.cu.execute("select * from amazon_price_data;")
+		except db.Error,e:
+			logging.warning( e.args[0])
+		writer = csv.writer(open('data.csv','wb'))
+		writer.writerow(['ASIN','TITLE','WEIGHT','CN','JP','US','UK','FR','DE','ES','IT','JP-MIN'])
+		for data_list in sql.cu:
+			data_list_temp = []
+			[data_list_temp.append(temp) for temp in data_list]
+			for i in range(len(data_list_temp)):
+				if type(data_list_temp[i]) != float and  data_list_temp[i] != None:
+					data_list_temp[i] = data_list_temp[i].encode("utf-8")
+			writer.writerow(data_list_temp)
 
 class ZN:
 	amazonBuyer = None
 	def fork(self,url):
-		print "fork start"
 
 		sql = Sqldb()
 		try:
 			sql.cu.execute("delete from amazon_price_data;")
 			sql.conn.commit()
 		except db.Error,e:
-			print e.args[0]
+			logging.warning( e.args[0])
 		thread.start_new_thread(ZN.amazonBuyer.new_SearchProcess,(url,))
 		return
 		# try:

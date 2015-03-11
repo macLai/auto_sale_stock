@@ -12,6 +12,13 @@ import mechanize
 import json
 import os
 import sqlite3 as db
+import logging
+
+logging.basicConfig(level=logging.DEBUG,
+                format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',
+                datefmt='%a, %d %b %Y %H:%M:%S',
+                filename='amazon.log',
+                filemode='w')
 
 path = {
 	"cn" : "http://www.amazon.cn/",
@@ -45,7 +52,7 @@ def requestXML(url,data):
 
 
 class AmazonBuyer:
-	def __init__(self,country,keyword):
+	def __init__(self,country,keyword,debug=False):
 		self.lock_search = thread.allocate_lock()
 		self.lock_write_file = thread.allocate_lock()
 		self.country = country
@@ -54,6 +61,8 @@ class AmazonBuyer:
 		self.processNum = 0
 		self.categoryList = []
 		self.is_searching = False
+		if debug == True:
+			return
 
 		unit = Unit()
 		self.write_head()
@@ -70,7 +79,7 @@ class AmazonBuyer:
 			try:
 				self.categoryList.extend([{"name":item.a.span.string,"path":path[self.country]+item.a.attrs["href"]} for item in category.find(id = "seeAllDepartmentOpen").contents if item != "\n" and item.a.span.string != "-"])
 			except:
-				print "no others category"
+				logging.warning( "no others category")
 
 		# thread.start_new_thread(self.write_to_csv,())
 
@@ -79,7 +88,7 @@ class AmazonBuyer:
 		# self.processNum = self.processNum + 1
 		# self.lock_search.release()
 		self.is_searching = True
-		print "search "+url
+		logging.info( "search "+url)
 		if url == "":
 			for category in self.categoryList:
 				self.new_SearchProcess(category.path)
@@ -88,7 +97,6 @@ class AmazonBuyer:
 		while True:
 			self.read_listpage_item(soup)
 			if self.is_searching == False:
-				print "self.is_searching == False"
 				break
 			ret,soup = self.next_page(soup)
 			if ret != 0:
@@ -112,7 +120,7 @@ class AmazonBuyer:
 			sql.cu.execute("insert into amazon_price_data (ASIN,NAME) values ('"+data+"', 'check bug please')")
 			sql.conn.commit()
 		except db.Error,e:
-			print e.args[0]
+			logging.warning( e.args[0])
 
 	def write_to_csv(self):
 		# while True:
@@ -143,13 +151,14 @@ class AmazonBuyer:
 				output.write(data)
 			output.close()
 
-	def write_to_db(self, product):
+	def write_to_db(self, product, debug=False):
 		sql = Sqldb()
 		product_list = []
 		price = {}
 		asin = product.asin.encode('utf-8')
 		weight = product.weight.encode('utf-8')
 		title = product.title.encode('utf-8')
+		min_price = 0
 		for pathid in path.keys():
 			if type(product.price[pathid]) == float:
 				price[pathid] = product.price[pathid]*Unit.country_price_list[pathid]
@@ -160,12 +169,20 @@ class AmazonBuyer:
 					price[pathid] = 0
 			else:
 				price[pathid] = 0
-		sqldata = "insert into amazon_price_data (ASIN,NAME,WEIGHT,CN,JP,US,UK,FR,DE,ES,IT) values ('"+asin+"','"+title+"','"+weight+"',"+str(price["cn"])+","+str(price["jp"])+","+str(price["us"])+","+str(price["uk"])+","+str(price["fr"])+","+str(price["de"])+","+str(price["es"])+","+str(price["it"])+");"
+			if pathid != "jp" and price[pathid] != 0:
+				if min_price == 0 or min_price > price[pathid]:
+					min_price = price[pathid]
+		if min_price == 0:
+			min_price = price["jp"]
+		sqldata = "insert into amazon_price_data (ASIN,NAME,WEIGHT,CN,JP,US,UK,FR,DE,ES,IT,MARGIN) values ('"+asin+"','"+title+"','"+weight+"',"+str(price["cn"])+","+str(price["jp"])+","+str(price["us"])+","+str(price["uk"])+","+str(price["fr"])+","+str(price["de"])+","+str(price["es"])+","+str(price["it"])+","+str(price["jp"]-min_price)+");"
+		if debug == True:
+			print sqldata
+			return
 		try:
 			sql.cu.execute(sqldata)
 			sql.conn.commit()
 		except db.Error,e:
-			print e.args[0]
+			logging.warning( e.args[0])
 		sql.cu.close() 
 
 	def read_listpage_item(self,soup):
@@ -174,10 +191,7 @@ class AmazonBuyer:
 		for item in productXMLList:
 			try:
 				if self.is_searching == False:
-					print "read_listpage_item self.is_searching == False"
 					return
-				else:
-					print "read_listpage_item self.is_searching == True"
 				product = Product(item.attrs['data-asin'])
 				self.lock_write_file.acquire()
 				self.write_to_db(product)
@@ -191,7 +205,7 @@ class AmazonBuyer:
 			nextpagelink = soup.find(id = "pagnNextLink").attrs["href"]
 		except:
 			return (-1,None)
-		print "next page"
+		logging.info( "next page")
 		data = download(path[self.country]+nextpagelink)
 		soup = BeautifulSoup(data)
 		return (0,soup)
@@ -232,17 +246,17 @@ class Product:
 		self.weight = ""
 		[thread.start_new_thread(self.get_data,(x,)) for x in path.keys()]
 		#[{x:self.get_data(x,BeautifulSoup(download(path[x]+"o/ASIN/"+asin)))} for x in path.keys()]
-		print asin+" start"
+		logging.info( asin+" start")
 		while True:
 			if self.num >= len(path):
-				print asin+ " end"
+				logging.warning( asin+ " end")
 				return
 
 	def get_data(self,country):
 		try:
 			soup = BeautifulSoup(download(path[country]+"o/ASIN/"+self.asin))
 		except:
-			print("no found " + self.asin + " in " + country)
+			logging.warning("no found " + self.asin + " in " + country)
 			self.price[country] = ""
 			self.get_data_finish()
 			return -1
@@ -369,33 +383,36 @@ if  __name__ == '__main__':
 # example:xxx.exe us nike+air+max
 # 		"""
 # 		exit()
-# 	if len(sys.argv) != 3:
-# 		print "wrong keywords"
-# 		exit()
-# 	if sys.argv[1] not in path.keys():
-# 		print "wrong country"
-# 		exit()
-# 	print "start"
-# 	unit = Unit()
-# 	print "exchange rate: ", Unit.country_price_list
-# 	print sys.argv[2]
-	while 1:
-		country = raw_input('Enter Country Code(Ex:us,jp):').lower()
-		if country in path.keys():
-			break
-		print "wrong code"
-
-	keyword = raw_input('Enter Keyword(Ex:nike+air+max):').replace(" ","+")
-
-	try:
-		keyword = keyword.decode("Shift_JIS").encode("utf-8")
-	except:
-		keyword = keyword
-
 	unit = Unit()
-	print "exchange rate: ", Unit.country_price_list
+	if len(sys.argv) == 3:
+		try:
+			sys.argv[2] = sys.argv[2].decode("Shift_JIS").encode("utf-8")
+		except:
+			pass
+		AmazonBuyer(sys.argv[1], sys.argv[2])
+	if len(sys.argv) == 2:
+		product = Product(sys.argv[1])
+		AmazonBuyer(None,None,True).write_to_db(product,True)
+		print 
+	# print "start"
+	# unit = Unit()
+	# while 1:
+	# 	country = raw_input('Enter Country Code(Ex:us,jp):').lower()
+	# 	if country in path.keys():
+	# 		break
+	# 	print "wrong code"
 
-	amazon = AmazonBuyer(country, keyword)
+	# keyword = raw_input('Enter Keyword(Ex:nike+air+max):').replace(" ","+")
+
+	# try:
+	# 	keyword = keyword.decode("Shift_JIS").encode("utf-8")
+	# except:
+	# 	keyword = keyword
+
+	# unit = Unit()
+	# print "exchange rate: ", Unit.country_price_list
+
+	# amazon = AmazonBuyer(country, keyword)
 	# product = Product("B00TJE5ZB2")
 
 	# br = mechanize.Browser()  
