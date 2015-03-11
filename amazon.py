@@ -8,11 +8,12 @@ from bs4.element import NavigableString
 import re
 import time
 import thread
-import mechanize
+# import mechanize
 import json
 import os
 import sqlite3 as db
 import logging
+import requests
 
 logging.basicConfig(level=logging.DEBUG,
                 format='%(asctime)s %(filename)s[line:%(lineno)d] %(levelname)s %(message)s',
@@ -31,16 +32,19 @@ path = {
 	"it" : "http://www.amazon.it/"
 	}
 head = [("User-agent", "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.2.13) Gecko/20101206 Ubuntu/10.10 (maverick) Firefox/3.6.13")]
-
+headers = {"User-agent": "Mozilla/5.0 (X11; U; Linux i686; en-US; rv:1.9.2.13) Gecko/20101206 Ubuntu/10.10 (maverick) Firefox/3.6.13"}
 
 
 
 def download(url):
-	br = mechanize.Browser()  
-	# br.set_debug_http(True)
-	br.set_handle_robots(False)
-	br.addheaders = head
-	return br.open(url).read()
+	# br = mechanize.Browser()  
+	# # br.set_debug_http(True)
+	# br.set_handle_robots(False)
+	# br.addheaders = head
+	# return br.open(url).read()
+
+	response = requests.get(url,headers=headers,timeout=10)
+	return response.content
 
 def requestXML(url,data):
 	br.set_debug_http(True)
