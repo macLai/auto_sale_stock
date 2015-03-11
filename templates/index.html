@@ -1,7 +1,13 @@
 $def with (is_working,page,category,search_data)
 
+<html>
+<head>
+	<title>amazon tool</title>
+</head>
+<body>
+
 $if is_working == 1:
-	in Searching <form><input type="hidden" name="stop" value="true" /><input type="submit" value="stop"/></form>
+	in Searching <form  method="POST"><input type="hidden" name="stop" value="true" /><input type="submit" value="stop"/></form>
 $elif is_working == 0:
 	<form method="POST">
 		country:
@@ -36,3 +42,5 @@ $for i in range(page):
 <table  border="1">
 	$:search_data
 </table>
+</body>
+</html>
