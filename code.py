@@ -29,14 +29,15 @@ class index:
 		search_data = ""
 		for data_list in sql.cu:
 				search_data += "<tr>"
-				for i in range(1,12):
-					search_data += "<td>"+ str(data_list[i])+"</td>"
+				for i in range(0,12):
+					if type(data_list[i]) != float and  data_list[i] != None:
+						search_data += "<td>"+ data_list[i].encode("utf-8")+"</td>"
+					else:
+						search_data += "<td>"+ str(data_list[i])+"</td>"
 				search_data += "</tr>"
-				print search_data
-
 		if ZN.amazonBuyer == None:
 			is_searching = 0
-		elif ZN.child == 0:
+		elif ZN.amazonBuyer.is_searching == False:
 			is_searching = 2
 			category = '<option value="cancel">CANCEL</option><option value="all">ALL</option>'
 			for cate in ZN.amazonBuyer.categoryList:
@@ -65,29 +66,28 @@ class index:
 				
 				ZN().fork(urllib.unquote(keylist["category"]))
 		if "stop" in keylist.keys():
-			if ZN.child != 0:
+			if ZN.amazonBuyer.is_searching != False:
 				# os.kill( ZN.child, signal.CTRL_BREAK_EVENT)
 				ZN.amazonBuyer = None
 		raise web.seeother('/')
 
 class ZN:
 	amazonBuyer = None
-	child = 0
 	def fork(self,url):
 		print "fork start"
-		# thread.start_new_thread(ZN.amazonBuyer.new_SearchProcess,(url,))
-		# return
-		try:
-			child_pid = os.fork()
-			if child_pid == 0:
-				print "i am child"
-				ZN.amazonBuyer.new_SearchProcess(url)
-				exit()
-			else:
-				print "father = ",child_pid
-				ZN.child = child_pid
-		except:
-			thread.start_new_thread(ZN.amazonBuyer.new_SearchProcess,(url,))
+		thread.start_new_thread(ZN.amazonBuyer.new_SearchProcess,(url,))
+		return
+		# try:
+		# 	child_pid = os.fork()
+		# 	if child_pid == 0:
+		# 		print "i am child"
+		# 		ZN.amazonBuyer.new_SearchProcess(url)
+		# 		exit()
+		# 	else:
+		# 		print "father = ",child_pid
+		# 		ZN.child = child_pid
+		# except:
+		# 	thread.start_new_thread(ZN.amazonBuyer.new_SearchProcess,(url,))
 
 
 
