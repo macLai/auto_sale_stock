@@ -119,7 +119,7 @@ class AmazonBuyer:
 		output.write(data)
 		output.close()
 
-	def write_error(self,data):
+	def write_error(self,sql,data):
 		try:
 			sql.cu.execute("insert into amazon_price_data (ASIN,NAME) values ('"+data+"', 'check bug please')")
 			sql.conn.commit()
@@ -155,8 +155,9 @@ class AmazonBuyer:
 				output.write(data)
 			output.close()
 
-	def write_to_db(self, product, debug=False):
-		sql = Sqldb()
+	def write_to_db(self, sql, product, debug=False):
+		logging.warning("write_to_db start")
+		
 		product_list = []
 		price = {}
 		asin = product.asin.encode('utf-8')
@@ -187,21 +188,21 @@ class AmazonBuyer:
 			sql.conn.commit()
 		except db.Error,e:
 			logging.warning( e.args[0])
-		sql.cu.close() 
+		logging.warning("write_to_db end")
 
 	def read_listpage_item(self,soup):
 		productXMLList = soup.findAll('li', {"class","s-result-item"})
 
 		for item in productXMLList:
+			sql = Sqldb()
 			try:
 				if self.is_searching == False:
 					return
 				product = Product(item.attrs['data-asin'])
-				self.lock_write_file.acquire()
-				self.write_to_db(product)
-				self.lock_write_file.release()
+				self.write_to_db(sql, product)
 			except:
-				self.write_error(item.attrs['data-asin'].encode('utf-8'))
+				self.write_error(sql, item.attrs['data-asin'].encode('utf-8'))
+			sql.cu.close() 
 		return 1
 
 	def next_page(self,soup):
